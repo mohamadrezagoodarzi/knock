@@ -1,56 +1,139 @@
-## knock: A port-knocking implementation
+### راهنمای نصب و پیکربندی ابزار Knockd
 
-Copyright (c) 2004, Judd Vinet <jvinet@zeroflux.org>
+این راهنما بهتون یاد می‌ده چطور ابزار **knockd** رو نصب و پیکربندی کنید تا باهاش سرویس SSH رو مدیریت کنید. با این ابزار می‌تونید با فرستادن یک سری از پورت‌ها (بهش می‌گن "دنباله پورت")، دسترسی به SSH روی پورت 22 رو باز یا بسته کنید.
 
-### ABOUT  
+---
 
-This is a port-knocking server/client.  Port-knocking is a method where a
-server can sniff one of its interfaces for a special "knock" sequence of
-port-hits.  When detected, it will run a specified event bound to that port
-knock sequence.  These port-hits need not be on open ports, since we use
-libpcap to sniff the raw interface traffic.
+#### 1. نصب knockd
 
+برای نصب knockd، این دستورها رو تو ترمینال وارد کنید:
 
-### BUILDING
+```bash
+sudo apt update
+sudo apt install knockd
+```
 
-To build knockd, make sure you have libpcap and the autoconf tools
-installed. Then run the following:
+---
 
-    $ autoreconf -fi
-    $ ./configure --prefix=/usr/local
-    $ make
-    $ sudo make install
+#### 2. ویرایش فایل‌های پیکربندی
 
+##### 2.1 تنظیم فایل `/etc/knockd.conf`
 
-### EXAMPLE  
+حالا برای ویرایش فایل پیکربندی knockd این دستور رو بزنید:
 
-The example below could be used to run a strict (DENY policy) firewall that
-can only be accessed after a successful knock sequence.
+```bash
+sudo nano /etc/knockd.conf
+```
 
-  1. Client sends four TCP SYN packets to Server, at the following ports:
-     38281, 29374, 4921, 54918
-  2. Server detects this and runs an iptables command to open port 22 to
-     Client.
-  3. Client connects to Server via SSH and does whatever it needs to do.
-  4. Client sends four more TCP SYN packets to Server:  37281, 8529,
-     40127, 10100
-  5. Server detects this and runs another iptables command to close port
-     22 to Client.
+توی این فایل، این تنظیمات رو اضافه کنید یا تغییر بدید:
 
+```bash
+[openSSH]
+    sequence    = 7000,8000,9000
+    seq_timeout = 5
+    command     = /sbin/iptables -I INPUT -p tcp --dport 22 -j ACCEPT
+    tcpflags    = syn
 
-### KNOCKING CLIENTS
+[closeSSH]
+    sequence    = 9000,8000,7000
+    seq_timeout = 5
+    command     = /sbin/iptables -I INPUT -p tcp --dport 22 -j DROP
+    tcpflags    = syn
+```
 
-The accompanying knock client is very basic.  If you want to do more advanced
-knocks (eg, setting specific tcp flags) then you should take look at more
-powerful clients.
+**توضیحات**:
+- **openSSH**: با این دنباله پورت‌ها (7000, 8000, 9000) می‌تونید دسترسی به SSH رو باز کنید.
+- **closeSSH**: این یکی هم برای بستن دسترسی به SSH با دنباله معکوسه (9000, 8000, 7000).
 
-  - [sendip](http://freshmeat.net/projects/sendip/)
+##### 2.2 تنظیم فایل `/etc/default/knockd`
 
+برای اینکه knockd همیشه با روشن شدن سیستم شروع به کار کنه، فایل `/etc/default/knockd` رو ویرایش کنید:
 
-### OTHER IMPLEMENTATIONS  
+```bash
+sudo nano /etc/default/knockd
+```
 
-Here are some other implementations of port-knocking:
+این خط رو پیدا کنید:
 
-  - [pasmal](http://sourceforge.net/projects/pasmal/)
-  - [doorman](http://doorman.sourceforge.net/)
+```bash
+START_KNOCKD=0
+```
 
+و به این تغییرش بدید:
+
+```bash
+START_KNOCKD=1
+```
+
+---
+
+#### 3. ری‌استارت کردن سرویس knockd
+
+بعد از تغییرات، باید سرویس knockd رو ری‌استارت کنید تا تغییرات اعمال بشه:
+
+```bash
+sudo systemctl restart knockd
+```
+
+---
+
+#### 4. استفاده از knockd برای مدیریت دسترسی به SSH
+
+##### 4.1 ساخت فایل `knock_open.bat`
+
+برای باز کردن SSH، یه فایل به نام `knock_open.bat` بسازید:
+
+```bash
+nano knock_open.bat
+```
+
+و این دستورات رو داخلش بذارید:
+
+```bash
+nmap -p 7000 --scanflags SYN <ip server>
+nmap -p 8000 --scanflags SYN <ip server>
+nmap -p 9000 --scanflags SYN <ip server>
+```
+
+بعد فایل رو ذخیره کنید و برای اجرا کردنش این دستور رو بزنید:
+
+```bash
+bash knock_open.bat
+```
+
+##### 4.2 ساخت فایل `knock_close.bat`
+
+برای بستن SSH، یه فایل به نام `knock_close.bat` بسازید:
+
+```bash
+nano knock_close.bat
+```
+
+این دستورات رو توش قرار بدید:
+
+```bash
+nmap -p 9000 --scanflags SYN <ip server>
+nmap -p 8000 --scanflags SYN <ip server>
+nmap -p 7000 --scanflags SYN <ip server>
+```
+
+بعد از ذخیره، فایل رو با این دستور اجرا کنید:
+
+```bash
+bash knock_close.bat
+```
+
+---
+
+### نکات آخر
+
+1. نیاز نیست فایروال UFW رو فعال کنید، ولی اگه دوست داشتید، می‌تونید پورت‌های 7000، 8000 و 9000 رو تغییر بدید.
+2. مطمئن بشید که `nmap` روی سیستمتون نصب شده. اگه نصب نیست، این دستور رو بزنید:
+
+   ```bash
+   sudo apt install nmap
+   ```
+
+---
+
+این راهنما شما رو قدم به قدم با نصب و پیکربندی knockd برای مدیریت دسترسی SSH آشنا کرد.
